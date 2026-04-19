@@ -79,6 +79,7 @@ int object_exists(const ObjectID *id) {
 //   9. Store the computed hash in *id_out
 //
 // Returns 0 on success, -1 on error.
+//implementing object header and hashing
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
     char header[64];
     const char *type_str;

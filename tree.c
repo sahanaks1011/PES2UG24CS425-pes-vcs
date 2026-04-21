@@ -53,9 +53,51 @@ uint32_t get_file_mode(const char *path) {
 //
 // Returns 0 on success, -1 on parse error.
 int tree_parse(const void *data, size_t len, Tree *tree_out) {
-    // TODO: Implement
-    (void)data; (void)len; (void)tree_out;
-    return -1;
+    const char *ptr = (const char *)data;
+    const char *end = ptr + len;
+
+    tree_out->count = 0;
+
+    while (ptr < end) {
+        if (tree_out->count >= MAX_TREE_ENTRIES) return -1;
+
+        TreeEntry *e = &tree_out->entries[tree_out->count];
+
+        // Parse mode
+        char mode_str[16];
+        int i = 0;
+        while (*ptr != ' ' && ptr < end && i < 15) {
+            mode_str[i++] = *ptr++;
+        }
+        mode_str[i] = '\0';
+
+        if (*ptr != ' ') return -1;
+        ptr++; // skip space
+
+        e->mode = strtol(mode_str, NULL, 8);
+
+        // Parse name
+        const char *name_start = ptr;
+        while (*ptr != '\0' && ptr < end) ptr++;
+
+        size_t name_len = ptr - name_start;
+        if (name_len >= sizeof(e->name)) return -1;
+
+        memcpy(e->name, name_start, name_len);
+        e->name[name_len] = '\0';
+
+        ptr++; // skip '\0'
+
+        // Read hash (32 bytes)
+        if (ptr + HASH_SIZE > end) return -1;
+
+        memcpy(e->id.hash, ptr, HASH_SIZE);
+        ptr += HASH_SIZE;
+
+        tree_out->count++;
+    }
+
+    return 0;
 }
 
 // Serialize a Tree struct into binary format for storage.

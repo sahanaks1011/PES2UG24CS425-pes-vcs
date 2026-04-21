@@ -183,9 +183,74 @@ int index_save(const Index *index) {
 //
 // Returns 0 on success, -1 on error (file not found, etc.).
 int index_add(Index *index, const char *path) {
-    // TODO: Implement
-    (void)index; (void)path;
-    return -1;
+    // 1. Open file
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        perror("fopen");
+        return -1;
+    }
+
+    // Get file size
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    rewind(f);
+
+    // Read file content
+    void *buf = malloc(size);
+    if (!buf) {
+        fclose(f);
+        return -1;
+    }
+
+    if (fread(buf, 1, size, f) != (size_t)size) {
+        free(buf);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    // 2. Write blob
+    ObjectID oid;
+    if (object_write(OBJ_BLOB, buf, size, &oid) != 0) {
+        free(buf);
+        return -1;
+    }
+    free(buf);
+
+    // 3. Stat file
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        return -1;
+    }
+
+    uint32_t mode = (st.st_mode & S_IXUSR) ? 0100755 : 0100644;
+
+    // 4. Find existing entry
+    IndexEntry *e = index_find(index, path);
+
+    if (e) {
+        // Update existing
+        e->hash = oid;
+        e->mode = mode;
+        e->mtime_sec = st.st_mtime;
+        e->size = st.st_size;
+    } else {
+        // Add new
+        if (index->count >= MAX_INDEX_ENTRIES) {
+            return -1;
+        }
+
+        e = &index->entries[index->count++];
+        e->hash = oid;
+        e->mode = mode;
+        e->mtime_sec = st.st_mtime;
+        e->size = st.st_size;
+        strncpy(e->path, path, sizeof(e->path) - 1);
+        e->path[sizeof(e->path) - 1] = '\0';
+    }
+
+    // 5. Save index
+    return index_save(index);
 }
 
 // Print the status of the working directory.

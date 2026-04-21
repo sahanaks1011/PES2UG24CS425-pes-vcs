@@ -150,7 +150,6 @@ int head_read(ObjectID *id_out) {
     }
     fclose(f);
 
-    // Case 1: symbolic ref (ref: refs/heads/main)
     if (strncmp(buf, "ref: ", 5) == 0) {
         char ref_path[256];
         sscanf(buf + 5, "%s", ref_path);
@@ -159,7 +158,7 @@ int head_read(ObjectID *id_out) {
         snprintf(full_path, sizeof(full_path), "%s/%s", PES_DIR, ref_path);
 
         FILE *rf = fopen(full_path, "r");
-        if (!rf) return -1; // no commits yet
+        if (!rf) return -1;
 
         char hex[HASH_HEX_SIZE + 1];
         if (!fgets(hex, sizeof(hex), rf)) {
@@ -171,10 +170,8 @@ int head_read(ObjectID *id_out) {
         return hex_to_hash(hex, id_out);
     }
 
-    // Case 2: detached HEAD (raw hash)
     return hex_to_hash(buf, id_out);
 }
-
 // Update the current branch ref to point to a new commit.
 //
 // Steps:

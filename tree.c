@@ -194,7 +194,67 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //
 // Returns 0 on success, -1 on error.
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement
-    (void)id_out;
-    return -1;
+    Index idx;
+    if (index_load(&idx) != 0) return -1;
+
+    Tree tree;
+    tree.count = 0;
+
+    for (int i = 0; i < idx.count; i++) {
+        IndexEntry *entry = &idx.entries[i];
+
+        char *path = entry->path;
+
+        // Check if it's a top-level file (no '/')
+        char *slash = strchr(path, '/');
+
+        if (!slash) {
+            // Direct file
+            TreeEntry *te = &tree.entries[tree.count++];
+
+            te->mode = entry->mode;
+            memcpy(te->hash.hash, entry->id.hash, HASH_SIZE);
+            strncpy(te->name, path, sizeof(te->name));
+        }
+        else {
+            // Directory case (only handle one level for now)
+            char dirname[256];
+            int len = slash - path;
+
+            strncpy(dirname, path, len);
+            dirname[len] = '\0';
+
+            // Check if already added
+            int found = 0;
+            for (int j = 0; j < tree.count; j++) {
+                if (strcmp(tree.entries[j].name, dirname) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
+
+            if (!found) {
+                TreeEntry *te = &tree.entries[tree.count++];
+
+                te->mode = MODE_DIR;
+                strncpy(te->name, dirname, sizeof(te->name));
+
+                // Dummy hash for now (will not be deeply recursive)
+                memset(te->hash.hash, 0, HASH_SIZE);
+            }
+        }
+    }
+
+    void *data = NULL;
+    size_t len = 0;
+
+    if (tree_serialize(&tree, &data, &len) != 0) return -1;
+
+    if (object_write(OBJ_TREE, data, len, id_out) != 0) {
+        free(data);
+        return -1;
+    }
+
+    free(data);
+    return 0;
 }

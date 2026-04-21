@@ -289,7 +289,98 @@ int index_add(Index *index, const char *path) {
 //
 // Returns 0.
 int index_status(const Index *index) {
-    // TODO: Implement
-    (void)index;
-    return -1;
+    printf("Staged changes:\n");
+
+    if (index->count == 0) {
+        printf("  (nothing to show)\n");
+    } else {
+        for (int i = 0; i < index->count; i++) {
+            printf("  new file:   %s\n", index->entries[i].path);
+        }
+    }
+
+    printf("\nUnstaged changes:\n");
+
+    int unstaged = 0;
+
+    for (int i = 0; i < index->count; i++) {
+        const IndexEntry *e = &index->entries[i];
+
+        struct stat st;
+        if (stat(e->path, &st) != 0) {
+            printf("  deleted:    %s\n", e->path);
+            unstaged = 1;
+            continue;
+        }
+
+        // Quick check using mtime + size
+        if (st.st_mtime != e->mtime_sec || st.st_size != e->size) {
+            // Recompute hash
+            FILE *f = fopen(e->path, "rb");
+            if (!f) continue;
+
+            fseek(f, 0, SEEK_END);
+            long size = ftell(f);
+            rewind(f);
+
+            void *buf = malloc(size);
+            if (!buf) {
+                fclose(f);
+                continue;
+            }
+
+            fread(buf, 1, size, f);
+            fclose(f);
+
+            ObjectID oid;
+            object_write(OBJ_BLOB, buf, size, &oid);
+            free(buf);
+
+            if (memcmp(oid.hash, e->hash.hash, HASH_SIZE) != 0) {
+                printf("  modified:   %s\n", e->path);
+                unstaged = 1;
+            }
+        }
+    }
+
+    if (!unstaged && index->count > 0) {
+        printf("  (nothing to show)\n");
+    }
+
+    printf("\nUntracked files:\n");
+
+    DIR *d = opendir(".");
+    if (!d) return 0;
+
+    struct dirent *ent;
+    int untracked = 0;
+
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 ||
+            strcmp(ent->d_name, "..") == 0 ||
+            strcmp(ent->d_name, ".pes") == 0) {
+            continue;
+        }
+
+        int found = 0;
+        for (int i = 0; i < index->count; i++) {
+            if (strcmp(index->entries[i].path, ent->d_name) == 0) {
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found) {
+            printf("  %s\n", ent->d_name);
+            untracked = 1;
+        }
+    }
+
+    closedir(d);
+
+    if (!untracked) {
+        printf("  (nothing to show)\n");
+    }
+
+    return 0;
 }

@@ -140,9 +140,39 @@ int commit_walk(commit_walk_fn callback, void *ctx) {
 //
 // Returns 0 on success, -1 if no commits exist yet.
 int head_read(ObjectID *id_out) {
-    // TODO: Implement
-    (void)id_out;
-    return -1;
+    FILE *f = fopen(HEAD_FILE, "r");
+    if (!f) return -1;
+
+    char buf[256];
+    if (!fgets(buf, sizeof(buf), f)) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    // Case 1: symbolic ref (ref: refs/heads/main)
+    if (strncmp(buf, "ref: ", 5) == 0) {
+        char ref_path[256];
+        sscanf(buf + 5, "%s", ref_path);
+
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", PES_DIR, ref_path);
+
+        FILE *rf = fopen(full_path, "r");
+        if (!rf) return -1; // no commits yet
+
+        char hex[HASH_HEX_SIZE + 1];
+        if (!fgets(hex, sizeof(hex), rf)) {
+            fclose(rf);
+            return -1;
+        }
+        fclose(rf);
+
+        return hex_to_hash(hex, id_out);
+    }
+
+    // Case 2: detached HEAD (raw hash)
+    return hex_to_hash(buf, id_out);
 }
 
 // Update the current branch ref to point to a new commit.
@@ -160,9 +190,46 @@ int head_read(ObjectID *id_out) {
 //
 // Returns 0 on success, -1 on error.
 int head_update(const ObjectID *new_commit) {
-    // TODO: Implement
-    (void)new_commit;
-    return -1;
+    FILE *f = fopen(HEAD_FILE, "r");
+    if (!f) return -1;
+
+    char buf[256];
+    if (!fgets(buf, sizeof(buf), f)) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    // Must be symbolic ref
+    if (strncmp(buf, "ref: ", 5) != 0) {
+        return -1;
+    }
+
+    char ref_path[256];
+    sscanf(buf + 5, "%s", ref_path);
+
+    char full_path[512];
+    snprintf(full_path, sizeof(full_path), "%s/%s", PES_DIR, ref_path);
+
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", full_path);
+
+    char hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(new_commit, hex);
+
+    int fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+
+    write(fd, hex, strlen(hex));
+    write(fd, "\n", 1);
+    fsync(fd);
+    close(fd);
+
+    if (rename(tmp_path, full_path) != 0) {
+        return -1;
+    }
+
+    return 0;
 }
 
 // Create a new commit from the current staging area.
@@ -185,7 +252,57 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // TODO: Implement
-    (void)message; (void)commit_id_out;
-    return -1;
+    // 1. Build tree
+    ObjectID tree_id;
+    if (tree_from_index(&tree_id) != 0) {
+        fprintf(stderr, "error: failed to build tree\n");
+        return -1;
+    }
+
+    // 2. Read parent
+    ObjectID parent_id;
+    int has_parent = (head_read(&parent_id) == 0);
+
+    // 3. Fill commit struct
+    Commit commit;
+    memset(&commit, 0, sizeof(commit));
+
+    commit.tree = tree_id;
+
+    if (has_parent) {
+        commit.parent = parent_id;
+        commit.has_parent = 1;
+    } else {
+        commit.has_parent = 0;
+    }
+
+    strncpy(commit.author, pes_author(), sizeof(commit.author) - 1);
+    commit.timestamp = (uint64_t)time(NULL);
+    strncpy(commit.message, message, sizeof(commit.message) - 1);
+
+    // 4. Serialize
+    void *data;
+    size_t len;
+
+    if (commit_serialize(&commit, &data, &len) != 0) {
+        fprintf(stderr, "error: serialize failed\n");
+        return -1;
+    }
+
+    // 5. Write object
+    if (object_write(OBJ_COMMIT, data, len, commit_id_out) != 0) {
+        free(data);
+        fprintf(stderr, "error: write failed\n");
+        return -1;
+    }
+
+    free(data);
+
+    // 6. Update HEAD
+    if (head_update(commit_id_out) != 0) {
+        fprintf(stderr, "error: head update failed\n");
+        return -1;
+    }
+
+    return 0;
 }

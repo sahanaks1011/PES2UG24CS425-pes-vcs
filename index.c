@@ -122,10 +122,48 @@ int index_load(Index *index) {
 // state even if the system crashes.
 //
 // Returns 0 on success, -1 on error.
+int cmp_index_entries(const void *a, const void *b) {
+    const IndexEntry *ea = (const IndexEntry *)a;
+    const IndexEntry *eb = (const IndexEntry *)b;
+    return strcmp(ea->path, eb->path);
+}
+
 int index_save(const Index *index) {
-    // TODO: Implement
-    (void)index;
-    return -1;
+    // 1. Make a copy so we can sort
+    Index temp = *index;
+
+    qsort(temp.entries, temp.count, sizeof(IndexEntry), cmp_index_entries);
+
+    // 2. Open temp file
+    FILE *f = fopen(".pes/index.tmp", "w");
+    if (!f) return -1;
+
+    // 3. Write entries
+    for (int i = 0; i < temp.count; i++) {
+        char hex[65];
+        hash_to_hex(&temp.entries[i].hash, hex);
+
+        fprintf(f, "%o %s %lu %u %s\n",
+                temp.entries[i].mode,
+                hex,
+                temp.entries[i].mtime_sec,
+                temp.entries[i].size,
+                temp.entries[i].path);
+    }
+
+    // 4. Flush + sync
+    fflush(f);
+    fsync(fileno(f));
+
+    // 5. Close
+    fclose(f);
+
+    // 6. Atomic rename
+    if (rename(".pes/index.tmp", ".pes/index") != 0) {
+        return -1;
+    }
+
+    return 0;
 }
 
 // Stage a file for the next commit.

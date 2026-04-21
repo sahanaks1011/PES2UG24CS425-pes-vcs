@@ -91,7 +91,7 @@ int tree_parse(const void *data, size_t len, Tree *tree_out) {
         // Read hash (32 bytes)
         if (ptr + HASH_SIZE > end) return -1;
 
-        memcpy(e->oid.hash, ptr, HASH_SIZE);
+        memcpy(e->hash.hash, ptr, HASH_SIZE);
         ptr += HASH_SIZE;
 
         tree_out->count++;
@@ -156,7 +156,7 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 
         *ptr++ = '\0';
 
-        memcpy(ptr, entries[i].oid.hash, HASH_SIZE);
+        memcpy(ptr, entries[i].hash.hash, HASH_SIZE);
         ptr += HASH_SIZE;
     }
 

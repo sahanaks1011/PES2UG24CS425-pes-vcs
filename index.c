@@ -17,6 +17,7 @@
 // TODO functions:     index_load, index_save, index_add, index_status
 
 #include "index.h"
+#include "pes.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,37 +130,29 @@ int cmp_index_entries(const void *a, const void *b) {
 }
 
 int index_save(const Index *index) {
-    // 1. Make a copy so we can sort
-    Index temp = *index;
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
 
-    qsort(temp.entries, temp.count, sizeof(IndexEntry), cmp_index_entries);
+    FILE *fp = fopen(tmp_path, "w");
+    if (!fp) return -1;
 
-    // 2. Open temp file
-    FILE *f = fopen(".pes/index.tmp", "w");
-    if (!f) return -1;
+    for (int i = 0; i < index->count; i++) {
+        const IndexEntry *e = &index->entries[i];
 
-    // 3. Write entries
-    for (int i = 0; i < temp.count; i++) {
-        char hex[65];
-        hash_to_hex(&temp.entries[i].hash, hex);
+        char hex[HASH_HEX_SIZE + 1];
+        hash_to_hex(&e->hash, hex);
 
-        fprintf(f, "%o %s %lu %u %s\n",
-                temp.entries[i].mode,
+        fprintf(fp, "%o %s %lu %u %s\n",
+                e->mode,
                 hex,
-                temp.entries[i].mtime_sec,
-                temp.entries[i].size,
-                temp.entries[i].path);
+                e->mtime_sec,
+                e->size,
+                e->path);
     }
 
-    // 4. Flush + sync
-    fflush(f);
-    fsync(fileno(f));
+    fclose(fp);
 
-    // 5. Close
-    fclose(f);
-
-    // 6. Atomic rename
-    if (rename(".pes/index.tmp", ".pes/index") != 0) {
+    if (rename(tmp_path, INDEX_FILE) != 0) {
         return -1;
     }
 
@@ -182,75 +175,84 @@ int index_save(const Index *index) {
 //   5. Save the index to disk (index_save)
 //
 // Returns 0 on success, -1 on error (file not found, etc.).
+
 int index_add(Index *index, const char *path) {
-    // 1. Open file
+    // 1. Stat the file
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        perror("stat");
+        return -1;
+    }
+
+    // 2. Open file
     FILE *f = fopen(path, "rb");
     if (!f) {
         perror("fopen");
         return -1;
     }
 
-    // Get file size
-    fseek(f, 0, SEEK_END);
+    // 3. Get file size
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+
     long size = ftell(f);
+    if (size < 0) {
+        fclose(f);
+        return -1;
+    }
+
     rewind(f);
 
-    // Read file content
+    // 4. Allocate buffer
     void *buf = malloc(size);
     if (!buf) {
         fclose(f);
         return -1;
     }
 
+    // 5. Read file contents
     if (fread(buf, 1, size, f) != (size_t)size) {
         free(buf);
         fclose(f);
         return -1;
     }
+
     fclose(f);
 
-    // 2. Write blob
+    // 6. Write blob object
     ObjectID oid;
     if (object_write(OBJ_BLOB, buf, size, &oid) != 0) {
         free(buf);
         return -1;
     }
+
     free(buf);
 
-    // 3. Stat file
-    struct stat st;
-    if (stat(path, &st) != 0) {
-        return -1;
-    }
+    // 7. Check if file already exists in index
+    IndexEntry *entry = index_find(index, path);
 
-    uint32_t mode = (st.st_mode & S_IXUSR) ? 0100755 : 0100644;
-
-    // 4. Find existing entry
-    IndexEntry *e = index_find(index, path);
-
-    if (e) {
-        // Update existing
-        e->hash = oid;
-        e->mode = mode;
-        e->mtime_sec = st.st_mtime;
-        e->size = st.st_size;
-    } else {
-        // Add new
+    if (!entry) {
+        // New entry
         if (index->count >= MAX_INDEX_ENTRIES) {
+            fprintf(stderr, "index full\n");
             return -1;
         }
 
-        e = &index->entries[index->count++];
-        e->hash = oid;
-        e->mode = mode;
-        e->mtime_sec = st.st_mtime;
-        e->size = st.st_size;
-        strncpy(e->path, path, sizeof(e->path) - 1);
-        e->path[sizeof(e->path) - 1] = '\0';
+        entry = &index->entries[index->count++];
     }
 
-    // 5. Save index
-    return index_save(index);
+    // 8. Fill entry fields
+    entry->mode = (uint32_t)st.st_mode;
+    entry->hash = oid;
+    entry->mtime_sec = (uint64_t)st.st_mtime;
+    entry->size = (uint32_t)st.st_size;
+
+    strncpy(entry->path, path, sizeof(entry->path) - 1);
+    entry->path[sizeof(entry->path) - 1] = '\0';
+
+    return 0;
 }
 
 // Print the status of the working directory.

@@ -10,6 +10,8 @@
 //   "100644 hello.txt\0" followed by 32 raw bytes of SHA-256
 
 #include "tree.h"
+#include "pes.h"
+#include "index.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,7 +215,7 @@ int tree_from_index(ObjectID *id_out) {
             TreeEntry *te = &tree.entries[tree.count++];
 
             te->mode = entry->mode;
-            memcpy(te->hash.hash, entry->id.hash, HASH_SIZE);
+            memcpy(te->hash.hash, entry->hash.hash, HASH_SIZE);
             strncpy(te->name, path, sizeof(te->name));
         }
         else {

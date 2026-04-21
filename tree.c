@@ -113,9 +113,57 @@ int tree_parse(const void *data, size_t len, Tree *tree_out) {
 // Caller must free(*data_out).
 // Returns 0 on success, -1 on error.
 int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)tree; (void)data_out; (void)len_out;
-    return -1;
+    if (!tree || !data_out || !len_out) return -1;
+
+    // Create a copy for sorting
+    TreeEntry entries[MAX_TREE_ENTRIES];
+    memcpy(entries, tree->entries, sizeof(TreeEntry) * tree->count);
+
+    // Sort entries by name
+    for (int i = 0; i < tree->count - 1; i++) {
+        for (int j = i + 1; j < tree->count; j++) {
+            if (strcmp(entries[i].name, entries[j].name) > 0) {
+                TreeEntry temp = entries[i];
+                entries[i] = entries[j];
+                entries[j] = temp;
+            }
+        }
+    }
+
+    // Calculate total size
+    size_t total = 0;
+    for (int i = 0; i < tree->count; i++) {
+        char mode_str[16];
+        snprintf(mode_str, sizeof(mode_str), "%o", entries[i].mode);
+
+        total += strlen(mode_str) + 1;           // mode + space
+        total += strlen(entries[i].name) + 1;    // name + '\0'
+        total += HASH_SIZE;                      // hash
+    }
+
+    char *buffer = malloc(total);
+    if (!buffer) return -1;
+
+    char *ptr = buffer;
+
+    // Write entries
+    for (int i = 0; i < tree->count; i++) {
+        char mode_str[16];
+        snprintf(mode_str, sizeof(mode_str), "%o", entries[i].mode);
+
+        int written = sprintf(ptr, "%s %s", mode_str, entries[i].name);
+        ptr += written;
+
+        *ptr++ = '\0';
+
+        memcpy(ptr, entries[i].id.hash, HASH_SIZE);
+        ptr += HASH_SIZE;
+    }
+
+    *data_out = buffer;
+    *len_out = total;
+
+    return 0;
 }
 
 // Build a tree hierarchy from the current index and write all tree
